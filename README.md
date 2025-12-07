@@ -3,6 +3,8 @@
 This is a simple REST API built with **Flask**, **Flask-RESTful**, and **Flask-SQLAlchemy**.  
 It provides basic CRUD operations for a `User` model with `id`, `name`, and `email`.
 
+[Watch demo video](rest_api_demo.mp4)
+
 ## Features
 
 - Get all users
