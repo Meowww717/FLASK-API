@@ -1,6 +1,7 @@
-from flask import Flask
+from flask import Flask, request
 from flask_sqlalchemy import SQLAlchemy
-from flask_restful import Resource, Api, reqparse, fields, marshal_with, abort
+from flask_restful import Resource, Api, fields, marshal_with, abort
+from sqlalchemy.exc import IntegrityError
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
@@ -13,17 +14,9 @@ class UserModel(db.Model):
     name = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(80), unique=True, nullable=False)
 
-    def __repo__(self):
-        return f"User(name = {self.name}, email = {self.email})"
+    def __repr__(self):
+        return f"User(name={self.name}, email={self.email})"
 
-
-user_args = reqparse.RequestParser()
-
-user_args.add_argument('name', type=str, required=True,
-                       help="Name cannot be blank")
-
-user_args.add_argument('email', type=str, required=True,
-                       help="Email cannot be blank")
 
 userFields = {
     'id': fields.Integer,
@@ -40,12 +33,19 @@ class Users(Resource):
 
     @marshal_with(userFields)
     def post(self):
-        args = user_args.parse_args()
-        user = UserModel(name=args['name'], email=args['email'])
-        db.session.add(user)
-        db.session.commit()
-        users = UserModel.query.all()
-        return users, 201
+        data = request.get_json()
+        if not data or "name" not in data or "email" not in data:
+            abort(400, message="Name and email are required")
+
+        user = UserModel(name=data["name"], email=data["email"])
+        try:
+            db.session.add(user)
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            abort(400, message="User with this name or email already exists")
+
+        return user, 201
 
 
 class User(Resource):
@@ -53,29 +53,37 @@ class User(Resource):
     def get(self, id):
         user = UserModel.query.filter_by(id=id).first()
         if not user:
-            abort(404, "User not found")
+            abort(404, message="User not found")
         return user
 
     @marshal_with(userFields)
     def patch(self, id):
-        args = user_args.parse_args()
+        data = request.get_json()
         user = UserModel.query.filter_by(id=id).first()
         if not user:
-            abort(404, "User not found")
-        user.name = args["name"]
-        user.email = args["email"]
-        db.session.commit()
+            abort(404, message="User not found")
+
+        if "name" in data:
+            user.name = data["name"]
+        if "email" in data:
+            user.email = data["email"]
+
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            abort(400, message="Duplicate name or email")
+
         return user
 
-    @marshal_with(userFields)
     def delete(self, id):
         user = UserModel.query.filter_by(id=id).first()
         if not user:
-            abort(404, "User not found")
+            abort(404, message="User not found")
+
         db.session.delete(user)
         db.session.commit()
-        users = UserModel.query.all()
-        return users
+        return {"message": f"User {id} deleted successfully"}, 200
 
 
 api.add_resource(Users, '/api/users/')
@@ -88,4 +96,6 @@ def home():
 
 
 if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)
